@@ -18,6 +18,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
 });
 
+// Hardcoded landmarks
 const LANDMARKS = [
   { name: 'Cubbon Park', lat: 12.9762, lng: 77.5988 },
   { name: 'UB City', lat: 12.9692, lng: 77.6050 },
@@ -27,6 +28,7 @@ const LANDMARKS = [
   { name: 'Trinity Circle', lat: 12.9716, lng: 77.5946 },
 ];
 
+// Helper functions
 function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number) {
   const R = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -36,29 +38,81 @@ function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: numbe
 }
 
 function distanceToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number) {
-  const dx = x2 - x1,
-    dy = y2 - y1;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
   const lenSq = dx * dx + dy * dy;
   if (lenSq === 0) return haversineDistance(px, py, x1, y1);
   let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
   t = Math.max(0, Math.min(1, t));
-  const projX = x1 + t * dx,
-    projY = y1 + t * dy;
+  const projX = x1 + t * dx;
+  const projY = y1 + t * dy;
   return haversineDistance(px, py, projX, projY);
 }
 
 function getAnonId() {
   let id = localStorage.getItem('drishti-anon-id');
-  if (!id) { id = 'anon-' + Math.random().toString(36).slice(2, 10);
-    localStorage.setItem('drishti-anon-id', id); }
+  if (!id) {
+    id = 'anon-' + Math.random().toString(36).slice(2, 10);
+    localStorage.setItem('drishti-anon-id', id);
+  }
   return id;
 }
 
+// Generate a curved detour around a hazard
+function generateDetourWaypoints(
+  start: { lat: number; lng: number },
+  end: { lat: number; lng: number },
+  hazard: { lat: number; lng: number },
+  numPoints: number = 10
+): [number, number][] {
+  const midLat = (start.lat + end.lat) / 2;
+  const midLng = (start.lng + end.lng) / 2;
+
+  const dx = end.lng - start.lng;
+  const dy = end.lat - start.lat;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 0.00001) return [[start.lat, start.lng], [end.lat, end.lng]];
+
+  const nx = dx / len;
+  const ny = dy / len;
+  const perpX = -ny;
+  const perpY = nx;
+
+  const hx = hazard.lng - midLng;
+  const hy = hazard.lat - midLat;
+  const hLen = Math.sqrt(hx * hx + hy * hy);
+  const pushFactor = 0.003; // ~300m offset
+  let offsetX = 0, offsetY = 0;
+  if (hLen > 0.00001) {
+    offsetX = -(hx / hLen) * pushFactor;
+    offsetY = -(hy / hLen) * pushFactor;
+  } else {
+    offsetX = perpX * pushFactor;
+    offsetY = perpY * pushFactor;
+  }
+
+  const cpLat = midLat + offsetY;
+  const cpLng = midLng + offsetX;
+
+  const waypoints: [number, number][] = [];
+  for (let i = 0; i <= numPoints; i++) {
+    const t = i / numPoints;
+    const lat = (1 - t) ** 2 * start.lat + 2 * (1 - t) * t * cpLat + t ** 2 * end.lat;
+    const lng = (1 - t) ** 2 * start.lng + 2 * (1 - t) * t * cpLng + t ** 2 * end.lng;
+    waypoints.push([lat, lng]);
+  }
+  return waypoints;
+}
+
 export default function CitizenPage() {
+  // Sync
   useEffect(() => { initSync(); }, []);
+
+  // Store
   const store = useDrishtiStore();
   const hazards = store.hazards.filter(h => h.status === 'active' || h.status === 'unconfirmed');
 
+  // States – declare ALL before any useEffect
   const [currentPosition] = useState({ lat: 12.9716, lng: 77.5946 });
   const [destination, setDestination] = useState<typeof LANDMARKS[0] | null>(null);
   const [routePoints, setRoutePoints] = useState<[number, number][]>([]);
@@ -74,13 +128,13 @@ export default function CitizenPage() {
   const [showSearchResults, setShowSearchResults] = useState(false);
   const alertedHazards = useRef<Set<string>>(new Set());
 
-  // Mount flag to prevent Leaflet "already initialized" error in Strict Mode
+  // Mount flag for Leaflet
   const [isMounted, setIsMounted] = useState(false);
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
-  // Route logic (same as before)
+  // --- Route computation (depends on destination, currentPosition, hazards) ---
   useEffect(() => {
     if (!destination) {
       setRoutePoints([]);
@@ -89,59 +143,42 @@ export default function CitizenPage() {
       setIsRouteActive(false);
       return;
     }
-    const from = currentPosition,
-      to = destination;
-    const points: [number, number][] = [
-      [from.lat, from.lng],
-      [to.lat, to.lng]
-    ];
-    setRoutePoints(points);
+    const from = currentPosition;
+    const to = destination;
+    const straightPoints: [number, number][] = [[from.lat, from.lng], [to.lat, to.lng]];
+    setRoutePoints(straightPoints);
     setIsRouteActive(true);
 
-    let hazardFound = false,
-      hazardType = '',
-      roadName = '';
+    let hazardFound = false;
+    let hazardType = '';
+    let roadName = '';
+    let hazardPoint = null;
+
     for (const h of hazards) {
       if (distanceToSegment(h.lat, h.lng, from.lat, from.lng, to.lat, to.lng) < 300) {
         hazardFound = true;
         hazardType = h.type;
         roadName = getNearestRoad(h.lat, h.lng);
-        const midLat = (from.lat + to.lat) / 2,
-          midLng = (from.lng + to.lng) / 2;
-        const dx = to.lng - from.lng,
-          dy = to.lat - from.lat;
-        const len = Math.sqrt(dx * dx + dy * dy);
-        if (len > 0.00001) {
-          const perpX = -dy / len * 0.002,
-            perpY = dx / len * 0.002;
-          const hx = h.lng - midLng,
-            hy = h.lat - midLat;
-          const hLen = Math.sqrt(hx * hx + hy * hy);
-          let offsetX = perpX,
-            offsetY = perpY;
-          if (hLen > 0.00001) { const pushFactor = 0.003;
-            offsetX += (hx / hLen) * pushFactor;
-            offsetY += (hy / hLen) * pushFactor; }
-          const waypoint = { lat: midLat + offsetY, lng: midLng + offsetX };
-          setAlternateRoutePoints([
-            [from.lat, from.lng],
-            [waypoint.lat, waypoint.lng],
-            [to.lat, to.lng]
-          ]);
-        }
+        hazardPoint = { lat: h.lat, lng: h.lng };
         break;
       }
     }
-    if (hazardFound) setRouteBanner({ type: hazardType, road: roadName });
-    else { setRouteBanner(null);
-      setAlternateRoutePoints([]); }
+
+    if (hazardFound && hazardPoint) {
+      const detour = generateDetourWaypoints(from, to, hazardPoint, 10);
+      setAlternateRoutePoints(detour);
+      setRouteBanner({ type: hazardType, road: roadName });
+    } else {
+      setAlternateRoutePoints([]);
+      setRouteBanner(null);
+    }
   }, [destination, currentPosition, hazards]);
 
+  // --- Proximity alerts ---
   useEffect(() => {
     if (!isRouteActive) return;
     for (const h of hazards) {
-      if (haversineDistance(currentPosition.lat, currentPosition.lng, h.lat, h.lng) < 500 && !alertedHazards.current.has(h
-          .id)) {
+      if (haversineDistance(currentPosition.lat, currentPosition.lng, h.lat, h.lng) < 500 && !alertedHazards.current.has(h.id)) {
         alertedHazards.current.add(h.id);
         setToast({ message: `⚠️ Hazard ${h.type} near your route!`, type: 'warning' });
         setTimeout(() => setToast(null), 4000);
@@ -149,16 +186,23 @@ export default function CitizenPage() {
     }
   }, [hazards, currentPosition, isRouteActive]);
 
+  // Helper for road name
   function getNearestRoad(lat: number, lng: number) {
-    let min = Infinity,
-      nearest = 'unknown road';
-    for (const l of LANDMARKS) { const d = haversineDistance(lat, lng, l.lat, l.lng); if (d < min) { min = d;
-        nearest = l.name; } }
+    let min = Infinity;
+    let nearest = 'unknown road';
+    for (const l of LANDMARKS) {
+      const d = haversineDistance(lat, lng, l.lat, l.lng);
+      if (d < min) { min = d; nearest = l.name; }
+    }
     return nearest;
   }
 
+  // --- Report handlers ---
   const handleReportSubmit = () => {
-    if (!reportLocation) { setToast({ message: 'Please select a location on the map.', type: 'warning' }); return; }
+    if (!reportLocation) {
+      setToast({ message: 'Please select a location on the map.', type: 'warning' });
+      return;
+    }
     store.addHazard({
       type: reportType,
       lat: reportLocation.lat,
@@ -176,19 +220,24 @@ export default function CitizenPage() {
     setReportType('accident');
   };
 
+  // Map click handler
   const MapClickHandler = () => {
     useMapEvents({
-      click: (e) => { if (showReportSheet) { const { lat, lng } = e.latlng;
-          setReportLocation({ lat, lng }); } }
+      click: (e) => {
+        if (showReportSheet) {
+          const { lat, lng } = e.latlng;
+          setReportLocation({ lat, lng });
+        }
+      }
     });
     return null;
   };
 
   const filteredLandmarks = LANDMARKS.filter(l => l.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
+  // --- Render ---
   return (
     <div className="relative h-screen w-full overflow-hidden">
-      {/* Map container – only rendered after mount */}
       {isMounted && (
         <MapContainer
           key="citizen-map"
@@ -197,7 +246,7 @@ export default function CitizenPage() {
           style={{ height: '100%', width: '100%' }}
         >
           <TileLayer
-            attribution='© OpenStreetMap'
+            attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           <Marker
@@ -230,7 +279,7 @@ export default function CitizenPage() {
         </MapContainer>
       )}
 
-      {/* Top bar, FAB, bottom sheet, toast – unchanged */}
+      {/* Top bar */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] bg-white/90 backdrop-blur-sm shadow-lg rounded-full px-4 py-2 flex items-center gap-3 w-[95%] max-w-xl">
         <div className="font-bold text-slate-800 text-sm sm:text-base">🚦 <span className="text-indigo-600">DRISHTI</span></div>
         <div className="relative flex-1">
@@ -238,8 +287,7 @@ export default function CitizenPage() {
             type="text"
             placeholder="Search destination..."
             value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value);
-              setShowSearchResults(e.target.value.length > 0); }}
+            onChange={(e) => { setSearchQuery(e.target.value); setShowSearchResults(e.target.value.length > 0); }}
             onFocus={() => setShowSearchResults(searchQuery.length > 0)}
             onBlur={() => setTimeout(() => setShowSearchResults(false), 200)}
             className="w-full rounded-full border border-slate-200 bg-slate-50 px-4 py-1.5 text-sm outline-none focus:border-indigo-500 focus:bg-white"
@@ -256,9 +304,7 @@ export default function CitizenPage() {
                   <div
                     key={l.name}
                     className="px-4 py-2 hover:bg-slate-50 cursor-pointer text-sm"
-                    onMouseDown={() => { setDestination(l);
-                      setSearchQuery(l.name);
-                      setShowSearchResults(false); }}
+                    onMouseDown={() => { setDestination(l); setSearchQuery(l.name); setShowSearchResults(false); }}
                   >
                     {l.name}
                   </div>
@@ -269,6 +315,7 @@ export default function CitizenPage() {
         </div>
       </div>
 
+      {/* Route banner */}
       {routeBanner && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-white/95 backdrop-blur-sm shadow-md rounded-full px-4 py-2 border border-slate-200 text-sm text-slate-800 max-w-[90%] flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 text-red-500" />
@@ -279,6 +326,7 @@ export default function CitizenPage() {
         </div>
       )}
 
+      {/* FAB */}
       <button
         onClick={() => setShowReportSheet(true)}
         className="absolute bottom-28 right-4 z-[1000] bg-indigo-600 text-white rounded-full px-5 py-3 shadow-xl flex items-center gap-2 font-medium hover:bg-indigo-700 transition active:scale-95"
@@ -286,6 +334,7 @@ export default function CitizenPage() {
         <AlertTriangle className="w-5 h-5" /> Report issue
       </button>
 
+      {/* Report sheet */}
       <AnimatePresence>
         {showReportSheet && (
           <motion.div
@@ -316,19 +365,21 @@ export default function CitizenPage() {
                 <label className="block text-sm font-medium text-slate-700 mb-1">Location</label>
                 <button
                   onClick={() => {
-                    if (navigator.geolocation)
+                    if (navigator.geolocation) {
                       navigator.geolocation.getCurrentPosition(
-                        pos => { setReportLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+                        pos => {
+                          setReportLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
                           setToast({ message: 'Location set via GPS', type: 'success' });
-                          setTimeout(() => setToast(null), 2000); },
+                          setTimeout(() => setToast(null), 2000);
+                        },
                         () => setToast({ message: 'Unable to get location', type: 'warning' })
                       );
+                    }
                   }}
                   className="w-full flex items-center justify-center gap-2 border border-dashed border-indigo-400 bg-indigo-50 rounded-xl py-3 text-sm font-medium text-indigo-700 hover:bg-indigo-100 transition"
                 >
                   <Locate className="w-4 h-4" />
-                  {reportLocation ? `📍 ${reportLocation.lat.toFixed(5)}, ${reportLocation.lng.toFixed(5)}` :
-                    'Tap map or use current location'}
+                  {reportLocation ? `📍 ${reportLocation.lat.toFixed(5)}, ${reportLocation.lng.toFixed(5)}` : 'Tap map or use current location'}
                 </button>
                 <p className="text-xs text-slate-400 mt-1">Click on the map to place a pin manually</p>
               </div>
@@ -353,6 +404,7 @@ export default function CitizenPage() {
         )}
       </AnimatePresence>
 
+      {/* Toast */}
       <AnimatePresence>
         {toast && (
           <motion.div
@@ -368,101 +420,3 @@ export default function CitizenPage() {
     </div>
   );
 }
-
-function generateDetourWaypoints(
-  start: { lat: number; lng: number },
-  end: { lat: number; lng: number },
-  hazard: { lat: number; lng: number },
-  numPoints: number = 8
-): [number, number][] {
-  // Calculate midpoint of start and end
-  const midLat = (start.lat + end.lat) / 2;
-  const midLng = (start.lng + end.lng) / 2;
-
-  // Direction vector from start to end
-  const dx = end.lng - start.lng;
-  const dy = end.lat - start.lat;
-  const len = Math.sqrt(dx * dx + dy * dy);
-  if (len < 0.00001) return [[start.lat, start.lng], [end.lat, end.lng]];
-
-  // Normalize
-  const nx = dx / len;
-  const ny = dy / len;
-
-  // Perpendicular direction (rotate 90°)
-  const perpX = -ny;
-  const perpY = nx;
-
-  // Vector from midpoint to hazard
-  const hx = hazard.lng - midLng;
-  const hy = hazard.lat - midLat;
-  const hLen = Math.sqrt(hx * hx + hy * hy);
-  // Push the control point away from the hazard
-  const pushFactor = 0.003; // ~300m offset
-  let offsetX = 0, offsetY = 0;
-  if (hLen > 0.00001) {
-    // Move in the opposite direction of the hazard from the midpoint
-    offsetX = -(hx / hLen) * pushFactor;
-    offsetY = -(hy / hLen) * pushFactor;
-  } else {
-    // If hazard is exactly at midpoint, use perpendicular direction
-    offsetX = perpX * pushFactor;
-    offsetY = perpY * pushFactor;
-  }
-
-  // Control point for Bezier: midpoint + offset
-  const cpLat = midLat + offsetY;
-  const cpLng = midLng + offsetX;
-
-  // Generate points along quadratic Bezier: (1-t)^2 * start + 2*(1-t)*t * cp + t^2 * end
-  const waypoints: [number, number][] = [];
-  for (let i = 0; i <= numPoints; i++) {
-    const t = i / numPoints;
-    const lat = (1 - t) ** 2 * start.lat + 2 * (1 - t) * t * cpLat + t ** 2 * end.lat;
-    const lng = (1 - t) ** 2 * start.lng + 2 * (1 - t) * t * cpLng + t ** 2 * end.lng;
-    waypoints.push([lat, lng]);
-  }
-  return waypoints;
-}
-
-// Inside CitizenPage component, replace the route computation useEffect:
-useEffect(() => {
-  if (!destination) {
-    setRoutePoints([]);
-    setAlternateRoutePoints([]);
-    setRouteBanner(null);
-    setIsRouteActive(false);
-    return;
-  }
-  const from = currentPosition;
-  const to = destination;
-  // Always draw the straight line as the main route
-  const straightPoints: [number, number][] = [[from.lat, from.lng], [to.lat, to.lng]];
-  setRoutePoints(straightPoints);
-  setIsRouteActive(true);
-
-  // Check for hazards within 300m
-  let hazardFound = false;
-  let hazardType = '';
-  let roadName = '';
-  let hazardPoint = null;
-  for (const h of hazards) {
-    if (distanceToSegment(h.lat, h.lng, from.lat, from.lng, to.lat, to.lng) < 300) {
-      hazardFound = true;
-      hazardType = h.type;
-      roadName = getNearestRoad(h.lat, h.lng);
-      hazardPoint = { lat: h.lat, lng: h.lng };
-      break;
-    }
-  }
-
-  if (hazardFound && hazardPoint) {
-    // Generate detour waypoints
-    const detourWaypoints = generateDetourWaypoints(from, to, hazardPoint, 10);
-    setAlternateRoutePoints(detourWaypoints);
-    setRouteBanner({ type: hazardType, road: roadName });
-  } else {
-    setAlternateRoutePoints([]);
-    setRouteBanner(null);
-  }
-}, [destination, currentPosition, hazards]);
