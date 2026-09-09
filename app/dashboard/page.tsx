@@ -1,9 +1,8 @@
 'use client';
-import dynamic from 'next/dynamic';
+import dynamicImport from 'next/dynamic';
 
-// We tell Next.js to never prerender this page
 export const dynamic = 'force-dynamic';
 
-const DashboardPage = dynamic(() => import('./DashboardPage'), { ssr: false });
+const DashboardPage = dynamicImport(() => import('./DashboardPage'), { ssr: false });
 
 export default DashboardPage;
