@@ -3,63 +3,30 @@ import { Hazard, Intersection, Zone, Officer, AmbulanceTrip } from './types';
 
 const genId = () => 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
 
-// Seed data
 const SEED_INTERSECTIONS: Intersection[] = [
   {
-    id: 'int-1',
-    name: 'Trinity Circle',
-    lat: 12.9716,
-    lng: 77.5946,
-    status: 'green',
-    signal: 'green',
-    laneCounts: [12, 8, 10, 6],
-    greenLaneIndex: 0,
-    greenSeconds: 15,
-    totalLanes: 4,
-    ambulanceOverride: false,
-    displayMessage: null,
+    id: 'int-1', name: 'Trinity Circle', lat: 12.9716, lng: 77.5946,
+    status: 'green', signal: 'green', laneCounts: [12, 8, 10, 6],
+    greenLaneIndex: 0, greenSeconds: 15, totalLanes: 4,
+    ambulanceOverride: false, displayMessage: null,
   },
   {
-    id: 'int-2',
-    name: 'Anil Kumble Circle',
-    lat: 12.9762,
-    lng: 77.5988,
-    status: 'green',
-    signal: 'green',
-    laneCounts: [9, 7, 11, 5],
-    greenLaneIndex: 2,
-    greenSeconds: 12,
-    totalLanes: 4,
-    ambulanceOverride: false,
-    displayMessage: null,
+    id: 'int-2', name: 'Anil Kumble Circle', lat: 12.9762, lng: 77.5988,
+    status: 'green', signal: 'green', laneCounts: [9, 7, 11, 5],
+    greenLaneIndex: 2, greenSeconds: 12, totalLanes: 4,
+    ambulanceOverride: false, displayMessage: null,
   },
   {
-    id: 'int-3',
-    name: 'Richmond Circle',
-    lat: 12.9658,
-    lng: 77.6012,
-    status: 'green',
-    signal: 'green',
-    laneCounts: [6, 10, 8, 7],
-    greenLaneIndex: 1,
-    greenSeconds: 18,
-    totalLanes: 4,
-    ambulanceOverride: false,
-    displayMessage: null,
+    id: 'int-3', name: 'Richmond Circle', lat: 12.9658, lng: 77.6012,
+    status: 'green', signal: 'green', laneCounts: [6, 10, 8, 7],
+    greenLaneIndex: 1, greenSeconds: 18, totalLanes: 4,
+    ambulanceOverride: false, displayMessage: null,
   },
   {
-    id: 'int-4',
-    name: 'Museum Road Junction',
-    lat: 12.9692,
-    lng: 77.6060,
-    status: 'green',
-    signal: 'green',
-    laneCounts: [14, 9, 12, 8],
-    greenLaneIndex: 3,
-    greenSeconds: 10,
-    totalLanes: 4,
-    ambulanceOverride: false,
-    displayMessage: null,
+    id: 'int-4', name: 'Museum Road Junction', lat: 12.9692, lng: 77.6060,
+    status: 'green', signal: 'green', laneCounts: [14, 9, 12, 8],
+    greenLaneIndex: 3, greenSeconds: 10, totalLanes: 4,
+    ambulanceOverride: false, displayMessage: null,
   },
 ];
 
@@ -81,7 +48,7 @@ const SEED_HAZARDS: Hazard[] = [
     lat: 12.9740,
     lng: 77.5960,
     description: 'Minor collision near Cubbon Park',
-    reportedBy: 'police',
+    reportedBy: 'officer',  // fixed
     status: 'active',
     weight: 2,
     createdAt: Date.now() - 600000,
@@ -93,7 +60,7 @@ const SEED_HAZARDS: Hazard[] = [
     lat: 12.9695,
     lng: 77.6020,
     description: 'Waterlogging on Museum Road',
-    reportedBy: 'police',
+    reportedBy: 'officer',  // fixed
     status: 'active',
     weight: 1,
     createdAt: Date.now() - 1200000,
@@ -107,7 +74,6 @@ export interface DrishtiState {
   zones: Zone[];
   officers: Officer[];
   ambulanceTrips: AmbulanceTrip[];
-
   addHazard: (hazard: Omit<Hazard, 'id' | 'createdAt' | 'updatedAt'>) => void;
   confirmHazard: (id: string) => void;
   dismissHazard: (id: string) => void;
