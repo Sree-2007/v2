@@ -19,9 +19,8 @@ L.Icon.Default.mergeOptions({
 
 function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number) {
   const R = 6371000;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  const dLat = (lat2 - lat1) * Math.PI / 180, dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLng/2)**2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
@@ -53,14 +52,19 @@ export default function PolicePage() {
   const zoneHazards = selectedZone ? hazards.filter(h => haversineDistance(h.lat, h.lng, selectedZone.lat, selectedZone.lng) <= selectedZone.radius) : [];
   const unconfirmedHazards = zoneHazards.filter(h => h.status === 'unconfirmed');
   const activeHazards = zoneHazards.filter(h => h.status === 'active');
-  const officerActiveHazards = activeHazards.filter(h => h.reportedBy === 'officer');
   const activeCount = activeHazards.length;
   const zoneStatus = activeCount >= 3 ? 'major' : activeCount >= 1 ? 'minor' : 'clear';
 
-  const handleMapClick = (lat: number, lng: number) => {
-    if (!flagMode) return;
-    setFlagLocation({ lat, lng });
-    setShowFlagModal(true);
+  const MapClickHandler = () => {
+    useMapEvents({
+      click: (e) => {
+        if (!flagMode) return;
+        const { lat, lng } = e.latlng;
+        setFlagLocation({ lat, lng });
+        setShowFlagModal(true);
+      }
+    });
+    return null;
   };
 
   const handleFlagSubmit = () => {
@@ -77,13 +81,6 @@ export default function PolicePage() {
     setShowFlagModal(false);
     setFlagLocation(null);
     setFlagMode(false);
-  };
-
-  const MapClickHandler = () => {
-    useMapEvents({
-      click: (e) => { if (flagMode) { const { lat, lng } = e.latlng; handleMapClick(lat, lng); } }
-    });
-    return null;
   };
 
   return (
