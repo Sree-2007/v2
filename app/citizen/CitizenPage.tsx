@@ -368,3 +368,101 @@ export default function CitizenPage() {
     </div>
   );
 }
+
+function generateDetourWaypoints(
+  start: { lat: number; lng: number },
+  end: { lat: number; lng: number },
+  hazard: { lat: number; lng: number },
+  numPoints: number = 8
+): [number, number][] {
+  // Calculate midpoint of start and end
+  const midLat = (start.lat + end.lat) / 2;
+  const midLng = (start.lng + end.lng) / 2;
+
+  // Direction vector from start to end
+  const dx = end.lng - start.lng;
+  const dy = end.lat - start.lat;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 0.00001) return [[start.lat, start.lng], [end.lat, end.lng]];
+
+  // Normalize
+  const nx = dx / len;
+  const ny = dy / len;
+
+  // Perpendicular direction (rotate 90°)
+  const perpX = -ny;
+  const perpY = nx;
+
+  // Vector from midpoint to hazard
+  const hx = hazard.lng - midLng;
+  const hy = hazard.lat - midLat;
+  const hLen = Math.sqrt(hx * hx + hy * hy);
+  // Push the control point away from the hazard
+  const pushFactor = 0.003; // ~300m offset
+  let offsetX = 0, offsetY = 0;
+  if (hLen > 0.00001) {
+    // Move in the opposite direction of the hazard from the midpoint
+    offsetX = -(hx / hLen) * pushFactor;
+    offsetY = -(hy / hLen) * pushFactor;
+  } else {
+    // If hazard is exactly at midpoint, use perpendicular direction
+    offsetX = perpX * pushFactor;
+    offsetY = perpY * pushFactor;
+  }
+
+  // Control point for Bezier: midpoint + offset
+  const cpLat = midLat + offsetY;
+  const cpLng = midLng + offsetX;
+
+  // Generate points along quadratic Bezier: (1-t)^2 * start + 2*(1-t)*t * cp + t^2 * end
+  const waypoints: [number, number][] = [];
+  for (let i = 0; i <= numPoints; i++) {
+    const t = i / numPoints;
+    const lat = (1 - t) ** 2 * start.lat + 2 * (1 - t) * t * cpLat + t ** 2 * end.lat;
+    const lng = (1 - t) ** 2 * start.lng + 2 * (1 - t) * t * cpLng + t ** 2 * end.lng;
+    waypoints.push([lat, lng]);
+  }
+  return waypoints;
+}
+
+// Inside CitizenPage component, replace the route computation useEffect:
+useEffect(() => {
+  if (!destination) {
+    setRoutePoints([]);
+    setAlternateRoutePoints([]);
+    setRouteBanner(null);
+    setIsRouteActive(false);
+    return;
+  }
+  const from = currentPosition;
+  const to = destination;
+  // Always draw the straight line as the main route
+  const straightPoints: [number, number][] = [[from.lat, from.lng], [to.lat, to.lng]];
+  setRoutePoints(straightPoints);
+  setIsRouteActive(true);
+
+  // Check for hazards within 300m
+  let hazardFound = false;
+  let hazardType = '';
+  let roadName = '';
+  let hazardPoint = null;
+  for (const h of hazards) {
+    if (distanceToSegment(h.lat, h.lng, from.lat, from.lng, to.lat, to.lng) < 300) {
+      hazardFound = true;
+      hazardType = h.type;
+      roadName = getNearestRoad(h.lat, h.lng);
+      hazardPoint = { lat: h.lat, lng: h.lng };
+      break;
+    }
+  }
+
+  if (hazardFound && hazardPoint) {
+    // Generate detour waypoints
+    const detourWaypoints = generateDetourWaypoints(from, to, hazardPoint, 10);
+    setAlternateRoutePoints(detourWaypoints);
+    setRouteBanner({ type: hazardType, road: roadName });
+  } else {
+    setAlternateRoutePoints([]);
+    setRouteBanner(null);
+  }
+}, [destination, currentPosition, hazards]);
