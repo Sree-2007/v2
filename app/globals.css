@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Additional global overrides for Leaflet maps */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+.leaflet-control-zoom {
+  z-index: 1000 !important;
+}
+.leaflet-popup-content-wrapper {
+  border-radius: 8px !important;
+}
