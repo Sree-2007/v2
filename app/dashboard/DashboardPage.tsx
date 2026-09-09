@@ -208,8 +208,8 @@ export default function DashboardPage() {
               zoomControl={false}
             >
               <TileLayer
-                attribution='© OpenStreetMap'
-                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
               {zones.map(z => {
                 const status = zonesByStatus.find(zs => zs.zone.id === z.id)?.status || 'clear';
